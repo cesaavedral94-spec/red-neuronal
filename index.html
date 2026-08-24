@@ -1,0 +1,1104 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mi Red Neuronal</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #0e0d1f;
+    color: #dde8ff;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+    user-select: none;
+  }
+
+  /* ── Background ── */
+  #bg-canvas {
+    position: fixed; inset: 0;
+    z-index: 0;
+    pointer-events: none;
+  }
+
+  /* ── Viewport (zooms/pans together) ── */
+  #viewport {
+    position: fixed; inset: 0;
+    transform-origin: 0 0;
+    z-index: 1;
+  }
+
+  /* ── SVG connections ── */
+  #svg-layer {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    overflow: visible;
+  }
+
+  /* ── Node layer ── */
+  #node-layer {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+  }
+
+  /* ── Toolbar ── */
+  #toolbar {
+    position: fixed;
+    top: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(14, 13, 31, 0.92);
+    border: 1px solid rgba(85, 51, 162, 0.45);
+    border-radius: 50px;
+    padding: 9px 22px;
+    backdrop-filter: blur(16px);
+    box-shadow: 0 0 30px rgba(85,51,162,0.12), 0 4px 24px rgba(0,0,0,0.6);
+    white-space: nowrap;
+  }
+
+  #app-title {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: #f0a830;
+    text-shadow: 0 0 14px rgba(240,168,48,0.55);
+  }
+
+  .sep { width: 1px; height: 18px; background: rgba(85,51,162,0.35); }
+
+  .tbtn {
+    background: rgba(85,51,162,0.12);
+    border: 1px solid rgba(109,111,163,0.45);
+    color: #b0a0e0;
+    padding: 5px 14px;
+    border-radius: 30px;
+    cursor: pointer;
+    font-size: 12px;
+    letter-spacing: 0.5px;
+    transition: all 0.18s;
+  }
+  .tbtn:hover {
+    background: rgba(85,51,162,0.28);
+    color: #fff;
+    box-shadow: 0 0 12px rgba(240,168,48,0.3);
+  }
+
+  #save-status {
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    color: rgba(240,168,48,0.45);
+    min-width: 70px;
+    text-align: right;
+  }
+
+  /* ── Nodes ── */
+  .node {
+    position: absolute;
+    display: flex;
+    align-items: flex-start;
+    gap: 7px;
+    min-width: 110px;
+    max-width: 210px;
+    padding: 9px 13px;
+    border-radius: 13px;
+    border: 1.5px solid;
+    cursor: grab;
+    transition: box-shadow 0.2s, opacity 0.2s;
+    backdrop-filter: blur(8px);
+  }
+  .node:active { cursor: grabbing; }
+
+  /* node colors applied inline via JS — no depth CSS needed */
+
+  .node.completed {
+    opacity: 0.45;
+  }
+  .node.completed .node-label {
+    text-decoration: line-through;
+    color: rgba(200,220,255,0.5);
+  }
+  .node.dragging {
+    box-shadow: 0 0 0 2px rgba(255,255,255,0.35), 0 12px 40px rgba(0,0,0,0.6);
+    z-index: 100;
+  }
+
+  /* check circle */
+  .node-check {
+    flex-shrink: 0;
+    margin-top: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 1.5px solid currentColor;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    font-weight: 700;
+    transition: background 0.15s, transform 0.15s;
+    color: inherit;
+  }
+  .node-check:hover { transform: scale(1.25); }
+  .node.completed .node-check {
+    background: currentColor;
+    color: #000;
+  }
+  .node.completed .node-check::after { content: '✓'; }
+
+  /* label */
+  .node-label {
+    flex: 1;
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: #dde8ff;
+    word-break: break-word;
+    cursor: text;
+    min-width: 0;
+  }
+  .node-label:focus {
+    outline: none;
+    color: #fff;
+  }
+
+  /* child count badge */
+  .node-badge {
+    flex-shrink: 0;
+    margin-top: 2px;
+    font-size: 9px;
+    font-weight: 700;
+    color: rgba(255,255,255,0.35);
+    letter-spacing: 0.5px;
+  }
+
+  /* ── Context menu (Win98 style) ── */
+  #ctx-menu {
+    position: fixed;
+    z-index: 500;
+    display: none;
+    min-width: 152px;
+    padding: 2px;
+    background: #d4d0c8;
+    border-top:    2px solid #ffffff;
+    border-left:   2px solid #ffffff;
+    border-right:  2px solid #404040;
+    border-bottom: 2px solid #404040;
+    box-shadow: 1px 1px 0 1px #000000;
+    font-family: Arial, 'MS Sans Serif', sans-serif;
+    font-size: 11px;
+    color: #000;
+    user-select: none;
+  }
+
+  .ctx-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 16px 3px 6px;
+    cursor: default;
+    white-space: nowrap;
+    color: #000;
+  }
+  .ctx-item:hover { background: #0a246a; color: #ffffff; }
+  .ctx-item.danger { color: #000; }
+  .ctx-item.danger:hover { background: #0a246a; color: #ffffff; }
+  .ctx-item span.ico { font-size: 11px; width: 16px; text-align: center; opacity: 1; }
+  .ctx-sep {
+    height: 0;
+    border-top: 1px solid #808080;
+    border-bottom: 1px solid #ffffff;
+    margin: 3px 2px;
+  }
+
+  /* ── Hints ── */
+  #hint {
+    position: fixed;
+    bottom: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 50;
+    font-size: 10.5px;
+    color: rgba(109,111,163,0.45);
+    letter-spacing: 1px;
+    pointer-events: none;
+    text-align: center;
+  }
+
+  /* ── Empty state ── */
+  #empty-hint {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    pointer-events: none;
+    z-index: 1;
+    transition: opacity 0.4s;
+  }
+  #empty-hint .big { font-size: 42px; opacity: 0.12; }
+  #empty-hint .txt { font-size: 13px; color: rgba(109,111,163,0.38); letter-spacing: 2px; }
+
+  /* ── Clock Widget (fixed, top-right) ── */
+  #clock-widget {
+    position: fixed;
+    top: 18px;
+    right: 22px;
+    z-index: 200;
+    background: rgba(14, 13, 31, 0.92);
+    border: 1px solid rgba(85, 51, 162, 0.45);
+    border-radius: 14px;
+    padding: 8px 16px 10px;
+    backdrop-filter: blur(16px);
+    box-shadow: 0 0 30px rgba(85,51,162,0.12), 0 4px 24px rgba(0,0,0,0.6);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    min-width: 108px;
+    pointer-events: none;
+  }
+  #clock-time {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    color: #f0a830;
+    text-shadow: 0 0 16px rgba(240,168,48,0.55);
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+  #clock-seconds {
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: rgba(240,168,48,0.45);
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+  #clock-date {
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    color: rgba(109,111,163,0.6);
+    text-transform: uppercase;
+    margin-top: 2px;
+  }
+  #clock-sep-line {
+    width: 100%;
+    height: 1px;
+    background: rgba(85,51,162,0.35);
+    margin: 4px 0 2px;
+  }
+
+  /* ── Win98 Canvas Context Menu ── */
+  #canvas-ctx-menu {
+    position: fixed;
+    z-index: 600;
+    display: none;
+    min-width: 140px;
+    padding: 2px;
+    background: #d4d0c8;
+    border-top:    2px solid #ffffff;
+    border-left:   2px solid #ffffff;
+    border-right:  2px solid #404040;
+    border-bottom: 2px solid #404040;
+    box-shadow: 1px 1px 0 1px #000000;
+    font-family: Arial, 'MS Sans Serif', sans-serif;
+    font-size: 11px;
+    color: #000;
+    user-select: none;
+  }
+
+  .cctx-item {
+    display: block;
+    padding: 3px 16px 3px 22px;
+    cursor: default;
+    white-space: nowrap;
+    color: #000;
+  }
+  .cctx-item:hover {
+    background: #0a246a;
+    color: #ffffff;
+  }
+  .cctx-item.disabled {
+    color: #808080;
+    pointer-events: none;
+  }
+  .cctx-sep {
+    height: 0;
+    border-top: 1px solid #808080;
+    border-bottom: 1px solid #ffffff;
+    margin: 3px 2px;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="bg-canvas"></canvas>
+<div id="viewport">
+  <svg id="svg-layer" xmlns="http://www.w3.org/2000/svg"></svg>
+  <div id="node-layer"></div>
+</div>
+
+<div id="toolbar">
+  <span id="app-title">⬡ Red Neuronal</span>
+  <div class="sep"></div>
+  <button class="tbtn" onclick="addRootNode()">＋ Nodo</button>
+  <button class="tbtn" onclick="autoLayout()">⌖ Organizar</button>
+  <button class="tbtn" onclick="clearAll()">✕ Limpiar</button>
+  <div class="sep"></div>
+  <span id="save-status">GUARDADO ✓</span>
+</div>
+
+<div id="clock-widget">
+  <div id="clock-time">00:00</div>
+  <div id="clock-sep-line"></div>
+  <div id="clock-seconds">:00</div>
+  <div id="clock-date">lun 01 ene</div>
+</div>
+
+<div id="ctx-menu">
+  <div class="ctx-item" id="ctx-add"><span class="ico">⊕</span> Agregar hijo</div>
+  <div class="ctx-item" id="ctx-complete"><span class="ico">✓</span> Completar</div>
+  <div class="ctx-item" id="ctx-edit"><span class="ico">✎</span> Editar nombre</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item danger" id="ctx-delete"><span class="ico">✕</span> Eliminar nodo</div>
+</div>
+
+<div id="canvas-ctx-menu">
+  <div class="cctx-item" id="cctx-add-node">+ Nodo</div>
+</div>
+
+<div id="empty-hint">
+  <div class="big">⬡</div>
+  <div class="txt">Presiona "+ Nodo" para comenzar tu red</div>
+</div>
+
+<div id="hint">
+  Rueda → zoom &nbsp;·&nbsp; Click central + arrastrar → mover vista &nbsp;·&nbsp; Click derecho → opciones &nbsp;·&nbsp; Doble click → editar
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  CLOCK
+// ═══════════════════════════════════════════════════════════════
+
+(function clockInit() {
+  const elTime = document.getElementById('clock-time');
+  const elSec  = document.getElementById('clock-seconds');
+  const elDate = document.getElementById('clock-date');
+  const DAYS  = ['dom','lun','mar','mié','jue','vie','sáb'];
+  const MONTHS= ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+
+  function tick() {
+    const now = new Date();
+    const h = String(now.getHours()).padStart(2,'0');
+    const m = String(now.getMinutes()).padStart(2,'0');
+    const s = String(now.getSeconds()).padStart(2,'0');
+    elTime.textContent = `${h}:${m}`;
+    elSec.textContent  = `:${s}`;
+    const day = DAYS[now.getDay()];
+    const d   = String(now.getDate()).padStart(2,'0');
+    const mon = MONTHS[now.getMonth()];
+    elDate.textContent = `${day} ${d} ${mon}`;
+  }
+  tick();
+  setInterval(tick, 1000);
+})();
+
+// ═══════════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════════
+
+let nodes = {};          // id → {id, label, x, y, parentId, children[], completed}
+let ctxTarget = null;
+let dragState  = null;
+let panState   = null;
+let saveTimer  = null;
+
+// ── Viewport transform: world → screen = translate(vp.x, vp.y) scale(vp.s) ──
+let vp = { x: 0, y: 0, s: 1 };
+const VP_MIN = 0.15, VP_MAX = 4;
+
+function applyViewport() {
+  document.getElementById('viewport').style.transform =
+    `translate(${vp.x}px,${vp.y}px) scale(${vp.s})`;
+}
+
+// Convert screen → world coords
+function toWorld(sx, sy) {
+  return { x: (sx - vp.x) / vp.s, y: (sy - vp.y) / vp.s };
+}
+
+// Zoom centered on screen point (cx, cy)
+function zoomAt(cx, cy, factor) {
+  const ns = Math.max(VP_MIN, Math.min(VP_MAX, vp.s * factor));
+  const delta = ns / vp.s;
+  vp.x = cx + (vp.x - cx) * delta;
+  vp.y = cy + (vp.y - cy) * delta;
+  vp.s = ns;
+  applyViewport();
+  drawConnections();
+}
+
+// ─── Palette ─────────────────────────────────────────────────────────────────
+// Index 0 = deep purple (level 0, fixed)
+// Index 1 = amber       (level 1, fixed)
+// Index 2 = mauve       (level 2+ random pool)
+// Index 3 = slate       (level 2+ random pool)
+// Index 4 = mid-purple  (level 2+ random pool)
+const DEPTH_COLORS = [
+  { stroke:'rgba(85,51,162,0.92)',   glow:'85,51,162',    check:'#5533a2', bg:'rgba(18,14,36,0.94)'  },
+  { stroke:'rgba(240,168,48,0.9)',   glow:'240,168,48',   check:'#f0a830', bg:'rgba(36,26,8,0.94)'   },
+  { stroke:'rgba(179,85,133,0.88)',  glow:'179,85,133',   check:'#b35585', bg:'rgba(32,14,26,0.94)'  },
+  { stroke:'rgba(109,111,163,0.85)', glow:'109,111,163',  check:'#6d6fa3', bg:'rgba(20,20,40,0.94)'  },
+  { stroke:'rgba(136,102,204,0.85)', glow:'136,102,204',  check:'#8866cc', bg:'rgba(22,16,42,0.94)'  },
+];
+function depthColor(idx) { return DEPTH_COLORS[Math.min(idx, DEPTH_COLORS.length-1)]; }
+
+// depthColorMap: depth → colorIdx. Depth 0 and 1 are fixed; 2+ are randomized once
+// and stay consistent for the entire session (one color per layer).
+let depthColorMap = {};
+
+function getColorForDepth(depth) {
+  if (depth === 0) return 0; // always purple
+  if (depth === 1) return 1; // always amber
+  if (depth === 2) return 2; // always mauve/rose
+  if (depthColorMap[depth] !== undefined) return depthColorMap[depth];
+  // Pick randomly from the "free" pool [2,3,4], avoiding the color of depth-1
+  const avoid = getColorForDepth(depth - 1);
+  const pool = [2, 3, 4].filter(i => i !== avoid);
+  depthColorMap[depth] = pool[Math.floor(Math.random() * pool.length)];
+  return depthColorMap[depth];
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  PERSISTENCE
+// ═══════════════════════════════════════════════════════════════
+
+function scheduleSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    localStorage.setItem('neural-web-v3', JSON.stringify({ nodes, depthColorMap }));
+    document.getElementById('save-status').textContent = 'GUARDADO ✓';
+  }, 600);
+  document.getElementById('save-status').textContent = 'GUARDANDO…';
+}
+
+function loadData() {
+  try {
+    const raw = localStorage.getItem('neural-web-v3');
+    if (raw) {
+      const data = JSON.parse(raw);
+      nodes = data.nodes || data; // support old format
+      depthColorMap = data.depthColorMap || {};
+      return Object.keys(nodes).length > 0;
+    }
+  } catch(e) {}
+  return false;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  HELPERS
+// ═══════════════════════════════════════════════════════════════
+
+function uid() { return 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2,5); }
+
+function getDepth(id) {
+  let d = 0, cur = id;
+  while (nodes[cur] && nodes[cur].parentId) { d++; cur = nodes[cur].parentId; }
+  return d;
+}
+
+function getDescendants(id) {
+  const result = [];
+  const q = [...(nodes[id]?.children || [])];
+  while (q.length) {
+    const cid = q.shift();
+    result.push(cid);
+    if (nodes[cid]) q.push(...nodes[cid].children);
+  }
+  return result;
+}
+
+function updateEmptyHint() {
+  const el = document.getElementById('empty-hint');
+  el.style.opacity = Object.keys(nodes).length === 0 ? '1' : '0';
+  el.style.pointerEvents = 'none';
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  NODE CREATION / RENDER
+// ═══════════════════════════════════════════════════════════════
+
+function createNodeData(label, x, y, parentId) {
+  const id = uid();
+  nodes[id] = { id, label, x, y, parentId: parentId || null, children: [], completed: false };
+  if (parentId && nodes[parentId]) nodes[parentId].children.push(id);
+  return id;
+}
+
+function buildNodeEl(id) {
+  const n = nodes[id];
+  const ci = getColorForDepth(getDepth(id));
+  const c = depthColor(ci);
+
+  const el = document.createElement('div');
+  el.className = 'node';
+  el.id = 'node-' + id;
+  el.style.left        = n.x + 'px';
+  el.style.top         = n.y + 'px';
+  el.style.borderColor = c.stroke;
+  el.style.background  = c.bg;
+  el.style.boxShadow   = `0 0 18px rgba(${c.glow},0.45)`;
+  if (n.completed) el.classList.add('completed');
+
+  // Check button
+  const check = document.createElement('div');
+  check.className = 'node-check';
+  check.style.borderColor = c.check;
+  check.style.color = c.check;
+  check.title = 'Marcar completado';
+  check.addEventListener('click', e => { e.stopPropagation(); toggleComplete(id); });
+  el.appendChild(check);
+
+  // Label
+  const label = document.createElement('div');
+  label.className = 'node-label';
+  label.textContent = n.label;
+  label.setAttribute('spellcheck', 'false');
+  label.addEventListener('dblclick', e => { e.stopPropagation(); startEdit(id); });
+  el.appendChild(label);
+
+  // Badge (child count, updated separately)
+  const badge = document.createElement('div');
+  badge.className = 'node-badge';
+  badge.id = 'badge-' + id;
+  updateBadge(id, badge, n);
+  el.appendChild(badge);
+
+  // Drag
+  el.addEventListener('mousedown', e => onNodeMouseDown(e, id));
+
+  // Context menu
+  el.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); showCtx(e, id); });
+
+  document.getElementById('node-layer').appendChild(el);
+}
+
+function updateBadge(id, badgeEl, n) {
+  if (!badgeEl) badgeEl = document.getElementById('badge-' + id);
+  if (!badgeEl) return;
+  const count = (n || nodes[id])?.children?.length || 0;
+  badgeEl.textContent = count > 0 ? `[${count}]` : '';
+}
+
+function renderAll() {
+  document.getElementById('node-layer').innerHTML = '';
+  Object.keys(nodes).forEach(id => buildNodeEl(id));
+  drawConnections();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ADD / DELETE
+// ═══════════════════════════════════════════════════════════════
+
+function addRootNode(label) {
+  label = label || 'Nodo ' + (Object.values(nodes).filter(n=>!n.parentId).length + 1);
+  const wc = toWorld(window.innerWidth / 2, window.innerHeight / 2);
+  const cx = wc.x + (Math.random()-0.5)*300 - 65;
+  const cy = wc.y + (Math.random()-0.5)*200 - 22;
+  const id = createNodeData(label, cx, cy, null);
+  buildNodeEl(id);
+  scheduleSave();
+  drawConnections();
+  updateEmptyHint();
+  return id;
+}
+
+function addChildNode(parentId, label) {
+  const p = nodes[parentId];
+  if (!p) return;
+  label = label || 'Subtarea';
+  const siblingCount = p.children.length;
+  const angleBase = -Math.PI / 2;
+  const spread = Math.PI * 0.5;
+  const angle = siblingCount === 0
+    ? Math.PI / 2
+    : angleBase + (siblingCount * spread) - spread * Math.floor(siblingCount/2);
+  const dist = 170 + getDepth(parentId) * 15;
+  const id = createNodeData(label, p.x + Math.cos(angle)*dist, p.y + Math.sin(angle)*dist, parentId);
+  buildNodeEl(id);
+  updateBadge(parentId);
+  scheduleSave();
+  drawConnections();
+  return id;
+}
+
+function deleteNode(id) {
+  const desc = getDescendants(id);
+  [...desc, id].forEach(nid => {
+    const el = document.getElementById('node-' + nid);
+    if (el) el.remove();
+    const n = nodes[nid];
+    if (n?.parentId && nodes[n.parentId]) {
+      nodes[n.parentId].children = nodes[n.parentId].children.filter(x => x !== nid);
+      updateBadge(n.parentId);
+    }
+    delete nodes[nid];
+  });
+  scheduleSave();
+  drawConnections();
+  updateEmptyHint();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  EDIT / COMPLETE
+// ═══════════════════════════════════════════════════════════════
+
+function startEdit(id) {
+  const el = document.querySelector('#node-' + id + ' .node-label');
+  if (!el) return;
+  el.contentEditable = 'true';
+  el.focus();
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+
+  function finish() {
+    el.contentEditable = 'false';
+    const txt = el.textContent.trim();
+    nodes[id].label = txt || nodes[id].label;
+    el.textContent = nodes[id].label;
+    scheduleSave();
+    el.removeEventListener('blur',   finish);
+    el.removeEventListener('keydown', onKey);
+  }
+  function onKey(e) {
+    if (e.key === 'Enter') { e.preventDefault(); el.blur(); }
+    if (e.key === 'Escape') { el.textContent = nodes[id].label; el.blur(); }
+  }
+  el.addEventListener('blur',   finish);
+  el.addEventListener('keydown', onKey);
+}
+
+function toggleComplete(id) {
+  nodes[id].completed = !nodes[id].completed;
+  const el = document.getElementById('node-' + id);
+  if (el) el.classList.toggle('completed', nodes[id].completed);
+  scheduleSave();
+  drawConnections();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  DRAG
+// ═══════════════════════════════════════════════════════════════
+
+function onNodeMouseDown(e, id) {
+  if (e.button !== 0) return;
+  if (e.target.classList.contains('node-check')) return;
+  if (e.target.contentEditable === 'true') return;
+  e.preventDefault();
+  const w = toWorld(e.clientX, e.clientY);
+  dragState = { id, ox: w.x - nodes[id].x, oy: w.y - nodes[id].y };
+  const el = document.getElementById('node-' + id);
+  if (el) { el.classList.add('dragging'); el.style.zIndex = 50; }
+}
+
+document.addEventListener('mousemove', e => {
+  // pan
+  if (panState) {
+    vp.x = e.clientX - panState.ox;
+    vp.y = e.clientY - panState.oy;
+    applyViewport();
+    drawConnections();
+    return;
+  }
+  // drag node
+  if (!dragState) return;
+  const { id, ox, oy } = dragState;
+  const w = toWorld(e.clientX, e.clientY);
+  nodes[id].x = w.x - ox;
+  nodes[id].y = w.y - oy;
+  const el = document.getElementById('node-' + id);
+  if (el) { el.style.left = nodes[id].x + 'px'; el.style.top = nodes[id].y + 'px'; }
+  drawConnections();
+});
+
+document.addEventListener('mouseup', e => {
+  if (panState) { panState = null; document.body.style.cursor = ''; return; }
+  if (!dragState) return;
+  const el = document.getElementById('node-' + dragState.id);
+  if (el) { el.classList.remove('dragging'); el.style.zIndex = ''; }
+  scheduleSave();
+  dragState = null;
+});
+
+// Middle-mouse pan
+document.addEventListener('mousedown', e => {
+  if (e.button === 1) {
+    e.preventDefault();
+    panState = { ox: e.clientX - vp.x, oy: e.clientY - vp.y };
+    document.body.style.cursor = 'grabbing';
+  }
+});
+
+// Wheel zoom
+document.addEventListener('wheel', e => {
+  e.preventDefault();
+  const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+  zoomAt(e.clientX, e.clientY, factor);
+}, { passive: false });
+
+// ═══════════════════════════════════════════════════════════════
+//  SVG CONNECTIONS
+// ═══════════════════════════════════════════════════════════════
+
+function getCenter(id) {
+  const el = document.getElementById('node-' + id);
+  if (!el) return null;
+  // offsetWidth/Height are unaffected by parent transform → gives world-space size
+  return {
+    x: nodes[id].x + el.offsetWidth  * 0.5,
+    y: nodes[id].y + el.offsetHeight * 0.5,
+  };
+}
+
+function drawConnections() {
+  const svg = document.getElementById('svg-layer');
+  svg.innerHTML = '';
+
+  const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+  svg.appendChild(defs);
+
+  Object.values(nodes).forEach(n => {
+    if (!n.parentId) return;
+    const from = getCenter(n.parentId);
+    const to   = getCenter(n.id);
+    if (!from || !to) return;
+
+    const c1 = depthColor(getColorForDepth(getDepth(n.parentId))).check;
+    const c2 = depthColor(getColorForDepth(getDepth(n.id))).check;
+    const gid = 'g_' + n.id;
+
+    const grad = document.createElementNS('http://www.w3.org/2000/svg', 'linearGradient');
+    grad.id = gid;
+    grad.setAttribute('gradientUnits', 'userSpaceOnUse');
+    grad.setAttribute('x1', from.x); grad.setAttribute('y1', from.y);
+    grad.setAttribute('x2', to.x);   grad.setAttribute('y2', to.y);
+    const s1 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
+    s1.setAttribute('offset', '0%');   s1.setAttribute('stop-color', c1);
+    const s2 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
+    s2.setAttribute('offset', '100%'); s2.setAttribute('stop-color', c2);
+    grad.appendChild(s1); grad.appendChild(s2);
+    defs.appendChild(grad);
+
+    const cx = (from.x + to.x) / 2;
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    const d = `M${from.x},${from.y} C${cx},${from.y} ${cx},${to.y} ${to.x},${to.y}`;
+    path.setAttribute('d', d);
+    path.setAttribute('stroke', `url(#${gid})`);
+    path.setAttribute('stroke-width', n.completed ? '1' : '1.8');
+    path.setAttribute('stroke-opacity', n.completed ? '0.2' : '0.65');
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke-linecap', 'round');
+    svg.appendChild(path);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CONTEXT MENU
+// ═══════════════════════════════════════════════════════════════
+
+function showCtx(e, id) {
+  ctxTarget = id;
+  const menu = document.getElementById('ctx-menu');
+  const n = nodes[id];
+  document.getElementById('ctx-complete').querySelector('.ico').textContent =
+    n.completed ? '↩' : '✓';
+  document.getElementById('ctx-complete').childNodes[1].textContent =
+    n.completed ? ' Desmarcar' : ' Completar';
+
+  menu.style.display = 'block';
+  const mx = Math.min(e.clientX, window.innerWidth  - 180);
+  const my = Math.min(e.clientY, window.innerHeight - 170);
+  menu.style.left = mx + 'px';
+  menu.style.top  = my + 'px';
+}
+
+function hideCtx() {
+  document.getElementById('ctx-menu').style.display = 'none';
+  ctxTarget = null;
+}
+
+document.getElementById('ctx-add').addEventListener('click', () => {
+  const id = ctxTarget; hideCtx(); if (id) addChildNode(id);
+});
+document.getElementById('ctx-complete').addEventListener('click', () => {
+  const id = ctxTarget; hideCtx(); if (id) toggleComplete(id);
+});
+document.getElementById('ctx-edit').addEventListener('click', () => {
+  const id = ctxTarget; hideCtx(); if (id) startEdit(id);
+});
+document.getElementById('ctx-delete').addEventListener('click', () => {
+  const id = ctxTarget; hideCtx();
+  if (!id) return;
+  const hasChildren = nodes[id]?.children?.length > 0;
+  const msg = hasChildren
+    ? `¿Eliminar "${nodes[id].label}" y todos sus hijos?`
+    : `¿Eliminar "${nodes[id].label}"?`;
+  if (confirm(msg)) deleteNode(id);
+});
+
+// ── Close menus on outside click ──────────────────────────────────────────────
+document.addEventListener('click', e => {
+  if (!document.getElementById('ctx-menu').contains(e.target)) hideCtx();
+  if (!document.getElementById('canvas-ctx-menu').contains(e.target)) hideCanvasCtx();
+});
+
+// ── Canvas right-click: Win98 menu ────────────────────────────────────────────
+let canvasCtxPos = null; // world position where right-click happened
+
+function showCanvasCtx(e) {
+  canvasCtxPos = toWorld(e.clientX, e.clientY);
+  const menu = document.getElementById('canvas-ctx-menu');
+  menu.style.display = 'block';
+  const mx = Math.min(e.clientX, window.innerWidth  - menu.offsetWidth  - 4);
+  const my = Math.min(e.clientY, window.innerHeight - menu.offsetHeight - 4);
+  menu.style.left = mx + 'px';
+  menu.style.top  = my + 'px';
+}
+
+function hideCanvasCtx() {
+  document.getElementById('canvas-ctx-menu').style.display = 'none';
+}
+
+document.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  if (e.target.closest('.node')) return; // node menu handled separately
+  hideCtx();
+  showCanvasCtx(e);
+});
+
+document.getElementById('cctx-add-node').addEventListener('click', () => {
+  const pos = canvasCtxPos || toWorld(window.innerWidth / 2, window.innerHeight / 2);
+  hideCanvasCtx();
+  const id = addRootNode('Nuevo nodo');
+  // Place it exactly where the user right-clicked
+  if (nodes[id]) {
+    nodes[id].x = pos.x - 65;
+    nodes[id].y = pos.y - 20;
+    const el = document.getElementById('node-' + id);
+    if (el) { el.style.left = nodes[id].x + 'px'; el.style.top = nodes[id].y + 'px'; }
+    scheduleSave();
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  TOOLBAR ACTIONS
+// ═══════════════════════════════════════════════════════════════
+
+function autoLayout() {
+  // Fan out root nodes, then position children radially
+  const roots = Object.values(nodes).filter(n => !n.parentId);
+  if (roots.length === 0) return;
+
+  const wc = toWorld(window.innerWidth / 2, window.innerHeight / 2);
+  const cx = wc.x, cy = wc.y;
+
+  function layoutTree(id, x, y, angleStart, angleEnd, radius) {
+    nodes[id].x = x - 60;
+    nodes[id].y = y - 20;
+    const el = document.getElementById('node-' + id);
+    if (el) { el.style.left = nodes[id].x + 'px'; el.style.top = nodes[id].y + 'px'; }
+    const ch = nodes[id].children;
+    if (!ch.length) return;
+    const step = (angleEnd - angleStart) / ch.length;
+    ch.forEach((cid, i) => {
+      const angle = angleStart + step * (i + 0.5);
+      layoutTree(cid, x + Math.cos(angle)*radius, y + Math.sin(angle)*radius,
+        angle - step/2, angle + step/2, radius * 0.75);
+    });
+  }
+
+  if (roots.length === 1) {
+    layoutTree(roots[0].id, cx, cy, -Math.PI, Math.PI, 180);
+  } else {
+    roots.forEach((n, i) => {
+      const angle = (i / roots.length) * Math.PI*2 - Math.PI/2;
+      const r = Math.min(220, roots.length * 55);
+      layoutTree(n.id, cx + Math.cos(angle)*r, cy + Math.sin(angle)*r,
+        angle - Math.PI/2, angle + Math.PI/2, 160);
+    });
+  }
+  scheduleSave();
+  drawConnections();
+}
+
+function clearAll() {
+  if (Object.keys(nodes).length === 0) return;
+  if (!confirm('¿Borrar toda la red? No se puede deshacer.')) return;
+  nodes = {};
+  document.getElementById('node-layer').innerHTML = '';
+  drawConnections();
+  scheduleSave();
+  updateEmptyHint();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ANIMATED BACKGROUND
+// ═══════════════════════════════════════════════════════════════
+
+(function initBg() {
+  const canvas  = document.getElementById('bg-canvas');
+  const ctx     = canvas.getContext('2d');
+
+  // ── Hex geometry (flat-top) ──────────────────────────────────────────────
+  const R       = 26;                      // circumradius
+  const W3      = Math.sqrt(3);
+  const COL_W   = 1.5 * R;                 // horizontal pitch
+  const ROW_H   = W3 * R;                  // vertical pitch
+
+  // Pre-rendered static grid on an offscreen canvas
+  const off     = document.createElement('canvas');
+  const octx    = off.getContext('2d');
+
+  // Pulses: random hex cells that glow and fade
+  let pulses = [];
+
+  function hexPath(ctx2, cx, cy) {
+    ctx2.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const a = (Math.PI / 3) * i;
+      const x = cx + R * Math.cos(a);
+      const y = cy + R * Math.sin(a);
+      i === 0 ? ctx2.moveTo(x, y) : ctx2.lineTo(x, y);
+    }
+    ctx2.closePath();
+  }
+
+  function buildGrid(W, H) {
+    off.width = W; off.height = H;
+    octx.clearRect(0, 0, W, H);
+
+    const cols = Math.ceil(W / COL_W) + 3;
+    const rows = Math.ceil(H / ROW_H) + 3;
+
+    // Outer glow pass (wider, more transparent)
+    octx.strokeStyle = 'rgba(0,255,60,0.04)';
+    octx.lineWidth   = 2.5;
+    octx.shadowBlur  = 0;
+    for (let c = -1; c < cols; c++) {
+      for (let r = -1; r < rows; r++) {
+        const cx = c * COL_W;
+        const cy = r * ROW_H + (c % 2 !== 0 ? ROW_H / 2 : 0);
+        hexPath(octx, cx, cy);
+        octx.stroke();
+      }
+    }
+
+    // Sharp inner line pass
+    octx.strokeStyle = 'rgba(0,255,60,0.14)';
+    octx.lineWidth   = 0.7;
+    octx.shadowColor = 'rgba(0,255,80,0.3)';
+    octx.shadowBlur  = 3;
+    for (let c = -1; c < cols; c++) {
+      for (let r = -1; r < rows; r++) {
+        const cx = c * COL_W;
+        const cy = r * ROW_H + (c % 2 !== 0 ? ROW_H / 2 : 0);
+        hexPath(octx, cx, cy);
+        octx.stroke();
+      }
+    }
+    octx.shadowBlur = 0;
+
+    // Build pulse pool from grid positions
+    const pool = [];
+    for (let c = 0; c < cols - 2; c++) {
+      for (let r = 0; r < rows - 2; r++) {
+        pool.push({ c, r });
+      }
+    }
+    // Pick ~18 random cells
+    pulses = [];
+    for (let i = 0; i < 18; i++) {
+      const p = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
+      pulses.push({ c: p.c, r: p.r, phase: Math.random() * Math.PI * 2, speed: 0.4 + Math.random() * 0.5 });
+    }
+  }
+
+  function draw() {
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+
+    // Blit static grid
+    ctx.drawImage(off, 0, 0);
+
+    // Animated glowing hex fills
+    const t = performance.now() * 0.001;
+    pulses.forEach(p => {
+      const alpha = ((Math.sin(t * p.speed + p.phase) + 1) * 0.5) * 0.04;
+      if (alpha < 0.002) return;
+      const cx = p.c * COL_W;
+      const cy = p.r * ROW_H + (p.c % 2 !== 0 ? ROW_H / 2 : 0);
+      hexPath(ctx, cx, cy);
+      ctx.fillStyle = `rgba(0,255,60,${alpha.toFixed(3)})`;
+      ctx.fill();
+    });
+
+    requestAnimationFrame(draw);
+  }
+
+  function resize() {
+    canvas.width  = window.innerWidth;
+    canvas.height = window.innerHeight;
+    buildGrid(canvas.width, canvas.height);
+    drawConnections();
+  }
+
+  window.addEventListener('resize', resize);
+  resize();
+  draw();
+})();
+
+// ═══════════════════════════════════════════════════════════════
+//  BOOT
+// ═══════════════════════════════════════════════════════════════
+
+(function boot() {
+  const loaded = loadData();
+
+  if (loaded) {
+    renderAll();
+  } else {
+    // Starter demo
+    const root = addRootNode('Mi vida');
+    setTimeout(() => {
+      const a = addChildNode(root, 'Quiero aprender');
+      const b = addChildNode(root, 'Quiero comprar');
+      const c = addChildNode(root, 'Proyectos');
+      setTimeout(() => {
+        addChildNode(a, 'Ejemplo: diseño UI');
+        addChildNode(a, 'Ejemplo: programación');
+        addChildNode(b, 'Ejemplo: teclado');
+        addChildNode(c, 'Esta red neuronal');
+        drawConnections();
+      }, 30);
+    }, 30);
+  }
+
+  updateEmptyHint();
+})();
+</script>
+</body>
+</html>
