@@ -1016,6 +1016,11 @@
   .db-thumb-wrap {
     position: relative; display: flex; flex-direction: column;
     align-items: center; gap: 7px; flex-shrink: 0;
+    transition: opacity 0.15s;
+  }
+  .db-thumb-wrap.db-thumb-dragging { opacity: 0.35; }
+  .db-thumb-wrap.db-thumb-drag-over .db-thumb-container {
+    outline: 2px solid rgba(240,160,40,0.75); outline-offset: 2px;
   }
   .db-thumb-container {
     overflow: hidden; position: relative;
@@ -1068,19 +1073,29 @@
     background: #060500; border-bottom: 1px solid rgba(240,160,48,0.1);
   }
   #db-edit-toolbar.visible { display: flex; }
-  .db-tool-sep { width:1px; height:14px; background:rgba(240,160,48,0.2); margin:0 3px; }
-  .db-tool-btn {
+  /* Toolbar sizes — normal / mediano / grande (todos los controles comparten la misma altura) */
+  #db-edit-toolbar { --dbt-h: 20px; --dbt-fs: 8px; --dbt-px: 7px; }
+  #db-edit-toolbar.dbt-size-m { --dbt-h: 26px; --dbt-fs: 10px; --dbt-px: 9px; gap: 5px; }
+  #db-edit-toolbar.dbt-size-l { --dbt-h: 34px; --dbt-fs: 13px; --dbt-px: 12px; gap: 6px; padding: 7px 16px; }
+  .db-tool-sep { width:1px; height:calc(var(--dbt-h) - 6px); background:rgba(240,160,48,0.2); margin:0 3px; }
+  .db-tool-btn, .db-tool-select {
+    box-sizing: border-box; height: var(--dbt-h); margin: 0;
     background: transparent; border: 1px solid rgba(240,160,48,0.3);
-    border-radius: 3px; font-family: 'Silkscreen', monospace; font-size: 8px;
-    color: rgba(240,160,48,0.5); padding: 3px 7px; cursor: pointer;
+    border-radius: 3px; font-family: 'Silkscreen', monospace; font-size: var(--dbt-fs);
+    color: rgba(240,160,48,0.5); padding: 0 var(--dbt-px); cursor: pointer;
     line-height: 1; user-select: none; letter-spacing: 0.3px;
-    min-width: 24px; text-align: center; transition: none;
+    min-width: var(--dbt-h); text-align: center; transition: none;
+    display: inline-flex; align-items: center; justify-content: center; vertical-align: middle;
   }
-  .db-tool-btn:hover { border-color: #f0a028; color: #f0a028; background: rgba(240,160,48,0.07); }
+  .db-tool-btn:hover, .db-tool-select:hover { border-color: #f0a028; color: #f0a028; background-color: rgba(240,160,48,0.07); }
   .db-tool-select {
-    background: #060500; border: 1px solid rgba(240,160,48,0.3);
-    border-radius: 3px; font-family: 'Silkscreen', monospace; font-size: 8px;
-    color: rgba(240,160,48,0.5); padding: 3px 5px; cursor: pointer; outline: none;
+    -webkit-appearance: none; appearance: none; outline: none;
+    background-color: #060500; display: inline-block; text-align: left;
+    padding-right: calc(var(--dbt-px) + 10px);
+    background-image: linear-gradient(45deg, transparent 50%, rgba(240,160,48,0.6) 50%),
+                      linear-gradient(135deg, rgba(240,160,48,0.6) 50%, transparent 50%);
+    background-position: calc(100% - 9px) 50%, calc(100% - 5px) 50%;
+    background-size: 4px 4px, 4px 4px; background-repeat: no-repeat;
   }
   .db-tool-select option { background: #060500; color: #f0a028; }
 
@@ -1132,10 +1147,21 @@
   /* ── Blocks ── */
   .db-block {
     position: absolute; border: 1px solid rgba(240,160,48,0.2);
-    background: rgba(6,5,0,0.85); cursor: move;
+    background: rgba(6,5,0,0.85); cursor: default;
     min-width: 60px; min-height: 30px; box-sizing: border-box; outline: none;
   }
   .db-block:hover { border-color: rgba(240,160,48,0.45); }
+  /* Drag handle — visible on hover */
+  .db-drag-handle {
+    display: none; position: absolute; top: -14px; left: 50%;
+    transform: translateX(-50%); width: 40px; height: 12px;
+    background: rgba(240,160,40,0.22); border: 1px solid rgba(240,160,40,0.35);
+    border-bottom: none; border-radius: 4px 4px 0 0;
+    cursor: grab; z-index: 20; align-items: center; justify-content: center;
+  }
+  .db-drag-handle::before { content: '⠿'; font-size: 8px; color: rgba(240,160,40,0.65); line-height: 1; }
+  .db-block:hover .db-drag-handle { display: flex; }
+  .db-drag-handle:active { cursor: grabbing; }
   .db-block.db-block-sel {
     border-color: rgba(240,160,48,0.8);
     box-shadow: 0 0 0 1px rgba(240,160,48,0.15); z-index: 10;
@@ -1949,6 +1975,8 @@
       </select>
       <div class="db-tool-sep"></div>
       <button class="db-tool-btn" id="dbt-del-block">✕ BLOQUE</button>
+      <div class="db-tool-sep"></div>
+      <button class="db-tool-btn" id="dbt-size" title="Tamaño de la barra: normal / mediano / grande">A·</button>
     </div>
     <div id="db-sheet-nav">
       <button class="db-nav-btn" id="dbn-prev">◀ PREV</button>
@@ -1975,6 +2003,7 @@
 <div id="db-img-ctx">
   <div class="db-ctx-item" id="db-img-ctx-title">✎ AGREGAR TÍTULO</div>
   <div class="db-ctx-item" id="db-img-ctx-upload">↑ SUBIR IMAGEN</div>
+  <div class="db-ctx-item" id="db-img-ctx-rotate">↻ ROTAR 90°</div>
   <div class="db-ctx-item" id="db-img-ctx-download">↓ DESCARGAR</div>
   <div class="db-ctx-item" id="db-img-ctx-delete">✕ ELIMINAR</div>
 </div>
@@ -5713,6 +5742,7 @@ let dbDimSheetId  = null;
 let dbImgTarget       = null;
 let _dbTextSaveTimer  = null; // debounce timer for text block input saves
 let dbDragSt      = null;
+let dbMultiSel    = new Set(); // Cmd/Ctrl multi-selection of block ids
 let dbResizeSt    = null;
 
 let dbActiveTxtEl = null;  // currently focused .db-txt-content element
@@ -5787,26 +5817,84 @@ function dbBuildPdfBlock(block){
   inner.append(icon,name,pages); return inner;
 }
 
-// ── Persistence ── split storage: structure in neural-db-v1, images in neural-db-imgs-v1
-// This ensures structural data (text, positions) always saves even when image data is large.
-function dbLoad() {
+// ── Image Storage — IndexedDB, unlimited size (no localStorage quota issues) ──
+const _IMG_IDB_NAME='neural-imgs-v1', _IMG_IDB_STORE='imgs';
+function _imgIdbOpen(){
+  return new Promise((res,rej)=>{
+    const r=indexedDB.open(_IMG_IDB_NAME,1);
+    r.onupgradeneeded=e=>{ const db=e.target.result; if(!db.objectStoreNames.contains(_IMG_IDB_STORE)) db.createObjectStore(_IMG_IDB_STORE,{keyPath:'id'}); };
+    r.onsuccess=e=>res(e.target.result);
+    r.onerror=e=>rej(e.target.error);
+  });
+}
+async function _imgIdbSaveAll(imgMap){
+  try{
+    const db=await _imgIdbOpen();
+    await new Promise((res,rej)=>{
+      const tx=db.transaction(_IMG_IDB_STORE,'readwrite');
+      const st=tx.objectStore(_IMG_IDB_STORE);
+      Object.entries(imgMap).forEach(([id,data])=>st.put({id,data}));
+      tx.oncomplete=()=>{db.close();res();}; tx.onerror=e=>{db.close();rej(e.target.error);};
+    });
+  }catch(e){console.warn('imgIdb save error:',e);}
+}
+async function _imgIdbLoadAll(){
+  try{
+    const db=await _imgIdbOpen();
+    return await new Promise(res=>{
+      const tx=db.transaction(_IMG_IDB_STORE,'readonly');
+      const r=tx.objectStore(_IMG_IDB_STORE).getAll();
+      r.onsuccess=e=>{
+        db.close();
+        const map={};
+        (e.target.result||[]).forEach(row=>{map[row.id]=row.data;});
+        res(map);
+      };
+      r.onerror=()=>{db.close();res({});};
+    });
+  }catch{return {};}
+}
+async function _imgIdbDeleteMany(ids){
+  if(!ids.length) return;
+  try{
+    const db=await _imgIdbOpen();
+    await new Promise(res=>{
+      const tx=db.transaction(_IMG_IDB_STORE,'readwrite');
+      const st=tx.objectStore(_IMG_IDB_STORE);
+      ids.forEach(id=>st.delete(id));
+      tx.oncomplete=()=>{db.close();res();}; tx.onerror=()=>{db.close();res();};
+    });
+  }catch{}
+}
+
+// ── Persistence ── structure in neural-db-v1, images in IndexedDB neural-imgs-v1
+async function dbLoad() {
   try {
     const r = localStorage.getItem('neural-db-v1');
     if (r) dashboardData = JSON.parse(r);
-    // Restore images from dedicated backup key
-    const imgRaw = localStorage.getItem('neural-db-imgs-v1');
-    if (imgRaw) {
-      const imgMap = JSON.parse(imgRaw);
-      Object.values(dashboardData).forEach(nd => {
-        (nd.sheets || []).forEach(sh => {
-          (sh.blocks || []).forEach(b => {
-            if (b.type === 'image' && !b.content && imgMap[b.id]) {
-              b.content = imgMap[b.id];
-            }
-          });
+    // Load images from IndexedDB
+    const imgMap = await _imgIdbLoadAll();
+    // Also migrate legacy localStorage images if present
+    const legacyRaw = localStorage.getItem('neural-db-imgs-v1');
+    if (legacyRaw) {
+      try {
+        const legacyMap = JSON.parse(legacyRaw);
+        Object.assign(imgMap, legacyMap); // merge (IDB takes priority)
+        // Save migrated images to IDB and remove from localStorage
+        await _imgIdbSaveAll(legacyMap);
+        localStorage.removeItem('neural-db-imgs-v1');
+        console.log('[DB] Migrated', Object.keys(legacyMap).length, 'images from localStorage → IndexedDB');
+      } catch(me){ console.warn('Legacy image migration error:', me); }
+    }
+    Object.values(dashboardData).forEach(nd => {
+      (nd.sheets || []).forEach(sh => {
+        (sh.blocks || []).forEach(b => {
+          if (b.type === 'image' && !b.content && imgMap[b.id]) {
+            b.content = imgMap[b.id];
+          }
         });
       });
-    }
+    });
   } catch(e) { console.warn('dbLoad error:', e); }
 }
 // ── Link title cache ─────────────────────────────────────────
@@ -5853,27 +5941,27 @@ function dbSave() {
   const ind = document.getElementById('db-save-status');
   if (ind) { ind.textContent = 'GUARDANDO…'; ind.className = 'db-saving'; }
   try {
-    // Build structure snapshot WITHOUT image content (stored separately)
+    // Build structure snapshot WITHOUT image content (stored in IndexedDB)
     const imgMap = {};
     const snap   = JSON.parse(JSON.stringify(dashboardData));
     Object.values(snap).forEach(nd => {
       (nd.sheets || []).forEach(sh => {
         (sh.blocks || []).forEach(b => {
           if (b.type === 'image' && b.content) {
-            imgMap[b.id] = b.content; // extract to separate map
-            b.content    = null;       // don't duplicate in main key
+            imgMap[b.id] = b.content;
+            b.content    = null;
           }
         });
       });
     });
     localStorage.setItem('neural-db-v1', JSON.stringify(snap));
-    // Save images separately — failure here is non-critical (structure already saved)
-    try {
-      localStorage.setItem('neural-db-imgs-v1', JSON.stringify(imgMap));
-    } catch(imgErr) {
-      console.warn('Dashboard image backup failed (storage quota):', imgErr);
-    }
-    if (ind) { ind.textContent = 'GUARDADO ✓'; ind.className = ''; }
+    // Save images to IndexedDB — no quota limits
+    _imgIdbSaveAll(imgMap).then(()=>{
+      if (ind) { ind.textContent = 'GUARDADO ✓'; ind.className = ''; }
+    }).catch(e=>{
+      console.error('Image IDB save error:', e);
+      if (ind) { ind.textContent = 'GUARDADO ✓'; ind.className = ''; }
+    });
   } catch(e) {
     console.error('Dashboard save failed:', e);
     if (ind) { ind.textContent = 'ERROR ✕'; ind.className = 'db-error'; }
@@ -6040,6 +6128,24 @@ function dbCreateThumbnail(sheet, idx) {
   dbRenderBlocksRO(sheet, inner);
   container.appendChild(inner);
   container.addEventListener('click',()=>dbOpenSheet(sheet.id));
+  // Sheet reorder — drag & drop
+  wrap.draggable=true;
+  wrap.addEventListener('dragstart',e=>{
+    e.dataTransfer.setData('text/plain',sheet.id); e.dataTransfer.effectAllowed='move';
+    setTimeout(()=>wrap.classList.add('db-thumb-dragging'),0);
+  });
+  wrap.addEventListener('dragend',()=>wrap.classList.remove('db-thumb-dragging'));
+  wrap.addEventListener('dragover',e=>{ e.preventDefault(); e.dataTransfer.dropEffect='move'; wrap.classList.add('db-thumb-drag-over'); });
+  wrap.addEventListener('dragleave',()=>wrap.classList.remove('db-thumb-drag-over'));
+  wrap.addEventListener('drop',e=>{
+    e.preventDefault(); wrap.classList.remove('db-thumb-drag-over');
+    const fromId=e.dataTransfer.getData('text/plain'); if(fromId===sheet.id) return;
+    const sheets=dashboardData[dbNodeId].sheets;
+    const fi=sheets.findIndex(s=>s.id===fromId), ti=sheets.findIndex(s=>s.id===sheet.id);
+    if(fi===-1||ti===-1) return;
+    const [moved]=sheets.splice(fi,1); sheets.splice(ti,0,moved);
+    dbSave(); dbRenderLanding();
+  });
   // delete button
   const del=document.createElement('button');
   del.className='db-thumb-del'; del.innerHTML='✕'; del.title='Eliminar hoja';
@@ -6062,7 +6168,7 @@ function dbRenderBlocksRO(sheet, container) {
     } else if(b.type==='image'&&b.content){
       el.style.overflow='visible';
       const img=document.createElement('img');
-      img.src=b.content; img.style.cssText='max-width:100%;max-height:100%;object-fit:contain;';
+      img.src=b.content; img.style.cssText=`max-width:100%;max-height:100%;object-fit:contain;${b.rotation?`transform:rotate(${b.rotation}deg);`:''}`;
       el.appendChild(img);
       if(b.caption !== undefined){
         const cap=document.createElement('div');
@@ -6176,6 +6282,7 @@ function dbRenderBlockEdit(block, canvas, sh) {
     // Also push undo snapshot so Cmd+Z (after blurring) can revert the whole edit session
     ct.addEventListener('focus',()=>{ dbActiveTxtEl=ct; pushDbUndo(); });
     ct.addEventListener('mousedown',e=>{
+      if(e.metaKey||e.ctrlKey){ e.preventDefault(); return; } // multi-select → bubble to block
       if(ct.contentEditable==='true') return; // already editing — let browser handle
       e.stopPropagation(); // don't start block drag
       // e.preventDefault() here would prevent focus — don't call it
@@ -6231,7 +6338,8 @@ function dbRenderBlockEdit(block, canvas, sh) {
     };
     if(block.content){
       const img=document.createElement('img'); img.src=block.content;
-      img.style.cssText='width:100%;height:100%;object-fit:contain;'; wrap.appendChild(img);
+      img.style.cssText=`width:100%;height:100%;object-fit:contain;${block.rotation?`transform:rotate(${block.rotation}deg);`:''}`;
+      wrap.appendChild(img);
     } else {
       const ph=document.createElement('span'); ph.className='db-img-placeholder'; ph.textContent='SOLTAR IMAGEN AQUÍ'; wrap.appendChild(ph);
     }
@@ -6269,6 +6377,29 @@ function dbRenderBlockEdit(block, canvas, sh) {
   ['nw','n','ne','e','se','s','sw','w'].forEach(d=>{
     const h=document.createElement('div'); h.className='db-rh '+d; h.dataset.dir=d; el.appendChild(h);
   });
+  // Drag handle
+  const dragHandle=document.createElement('div'); dragHandle.className='db-drag-handle'; el.appendChild(dragHandle);
+  // Starts a drag: group drag if this block is part of a multi-selection, else single
+  const startDrag=e=>{
+    if(dbMultiSel.size>1 && dbMultiSel.has(block.id)){
+      const group=[...dbMultiSel].map(id=>{
+        const b=sh.blocks.find(x=>x.id===id);
+        const be=document.querySelector(`.db-block[data-bid="${id}"]`);
+        return b&&be?{block:b,el:be,startBX:b.x,startBY:b.y}:null;
+      }).filter(Boolean);
+      dbDragSt={block,el,startX:e.clientX,startY:e.clientY,startBX:block.x,startBY:block.y,sh,group,
+                preSnap:JSON.stringify(sh.blocks)};
+      return;
+    }
+    dbDragSt={block,el,startX:e.clientX,startY:e.clientY,startBX:block.x,startBY:block.y,sh,
+              preSnap:JSON.stringify(sh.blocks)};
+    dbSelectBlock(block.id);
+  };
+  dragHandle.addEventListener('mousedown',e=>{
+    e.stopPropagation();
+    if(e.metaKey||e.ctrlKey){ dbToggleMultiSel(block.id); return; }
+    startDrag(e);
+  });
   el.addEventListener('mousedown',e=>{
     e.stopPropagation();
     if(e.target.classList.contains('db-rh')){
@@ -6277,16 +6408,19 @@ function dbRenderBlockEdit(block, canvas, sh) {
         preSnap:JSON.stringify(sh.blocks)};
       dbSelectBlock(block.id); return;
     }
+    if(e.target.classList.contains('db-drag-handle')) return; // handled above
+    if(e.metaKey||e.ctrlKey){ dbToggleMultiSel(block.id); return; }
     const ct=el.querySelector('.db-txt-content');
     if(ct&&ct.contentEditable==='true') return;
-    dbDragSt={block,el,startX:e.clientX,startY:e.clientY,startBX:block.x,startBY:block.y,sh,
-              preSnap:JSON.stringify(sh.blocks)};
-    dbSelectBlock(block.id);
+    // Allow drag from block body (not just handle)
+    startDrag(e);
   });
   el.addEventListener('click',e=>{
     e.stopPropagation();
     // Don't interrupt active text editing — ct.click already stopped propagation,
     // so this only fires for clicks on the block border/handles, not inside ct.
+    if(e.metaKey||e.ctrlKey) return;
+    if(dbMultiSel.size>1 && dbMultiSel.has(block.id)) return;
     const ct=el.querySelector('.db-txt-content');
     if(ct&&ct.contentEditable==='true') return;
     dbSelectBlock(block.id);
@@ -6301,6 +6435,21 @@ function dbDeselect() {
     el.classList.remove('db-block-sel');
   });
   dbSelBlockId=null;
+  dbMultiSel.clear();
+}
+// Cmd/Ctrl + click → add/remove block from multi-selection
+function dbToggleMultiSel(bid){
+  if(dbSelBlockId && !dbMultiSel.size) dbMultiSel.add(dbSelBlockId); // include current single selection
+  if(dbMultiSel.has(bid)) dbMultiSel.delete(bid); else dbMultiSel.add(bid);
+  // Blur any active text editing
+  if(document.activeElement&&document.activeElement.classList&&document.activeElement.classList.contains('db-txt-content')) document.activeElement.blur();
+  document.querySelectorAll('.db-block').forEach(be=>{
+    const on=dbMultiSel.has(be.dataset.bid);
+    be.classList.toggle('db-block-sel',on);
+    const ct=be.querySelector('.db-txt-content');
+    if(ct&&!on){ ct.contentEditable='false'; ct.style.pointerEvents='none'; }
+  });
+  dbSelBlockId=dbMultiSel.size===1?[...dbMultiSel][0]:(dbMultiSel.size?bid:null);
 }
 function dbSelectBlock(bid) {
   dbDeselect(); dbSelBlockId=bid;
@@ -6341,9 +6490,17 @@ document.addEventListener('mousemove',e=>{
   if(dbDragSt){
     const {block,el,startX,startY,startBX,startBY,sh}=dbDragSt;
     const dx=(e.clientX-startX)/dbZoom, dy=(e.clientY-startY)/dbZoom;
+    if(dbDragSt.group){
+      dbDragSt.group.forEach(g=>{
+        g.block.x=Math.max(0,Math.min(dbMm(sh.wMm)-g.block.w, g.startBX+dx));
+        g.block.y=Math.max(0,Math.min(dbMm(sh.hMm)-g.block.h, g.startBY+dy));
+        g.el.style.left=g.block.x+'px'; g.el.style.top=g.block.y+'px';
+      });
+    } else {
     block.x=Math.max(0,Math.min(dbMm(sh.wMm)-block.w, startBX+dx));
     block.y=Math.max(0,Math.min(dbMm(sh.hMm)-block.h, startBY+dy));
     el.style.left=block.x+'px'; el.style.top=block.y+'px';
+    }
   }
   if(dbResizeSt){
     const {block,el,dir,startX,startY,startBX,startBY,startBW,startBH}=dbResizeSt;
@@ -6612,7 +6769,28 @@ document.getElementById('dbt-image').addEventListener('click',()=>{
   dbImgTarget=b.id;
   document.getElementById('db-img-file').click();
 });
+// ── Toolbar size: normal → mediano → grande ──
+(function(){
+  const tb=document.getElementById('db-edit-toolbar'), btn=document.getElementById('dbt-size');
+  const sizes=['', 'dbt-size-m', 'dbt-size-l'], labels=['A·','A··','A···'];
+  let i=0; try{ i=+(localStorage.getItem('db-toolbar-size')||0)%3; }catch(e){}
+  const apply=()=>{ sizes.forEach(c=>c&&tb.classList.remove(c)); if(sizes[i]) tb.classList.add(sizes[i]); btn.textContent=labels[i]; };
+  apply();
+  btn.addEventListener('click',e=>{ e.stopPropagation(); i=(i+1)%3; apply(); try{localStorage.setItem('db-toolbar-size',i);}catch(e){} });
+})();
 document.getElementById('dbt-del-block').addEventListener('click',()=>{
+  if(dbMultiSel.size>1&&dbEditSheetId){
+    const sh=dbGetSheet(dbEditSheetId); if(!sh) return;
+    pushDbUndo();
+    dbMultiSel.forEach(id=>{
+      const blk=sh.blocks.find(b=>b.id===id);
+      if(blk&&blk.type==='pdf'&&blk.pdfId) dbDeletePdfData(blk.pdfId);
+      const el=document.querySelector(`.db-block[data-bid="${id}"]`); if(el) el.remove();
+    });
+    sh.blocks=sh.blocks.filter(b=>!dbMultiSel.has(b.id));
+    dbMultiSel.clear(); dbSelBlockId=null; dbSave(); dbUpdateThumbnail(sh.id);
+    return;
+  }
   if(!dbSelBlockId||!dbEditSheetId) return;
   const sh=dbGetSheet(dbEditSheetId); if(!sh) return;
   pushDbUndo();
@@ -6707,6 +6885,21 @@ document.getElementById('db-img-ctx-upload').addEventListener('click',e=>{
   e.stopPropagation();
   const block=dbImgCtxBlock; dbHideImgCtx();
   if(block){dbImgTarget=block.id;document.getElementById('db-img-file').click();}
+});
+document.getElementById('db-img-ctx-rotate').addEventListener('click',e=>{
+  e.stopPropagation();
+  const block=dbImgCtxBlock; dbHideImgCtx();
+  if(!block||!dbEditSheetId) return;
+  pushDbUndo();
+  block.rotation=((block.rotation||0)+90)%360;
+  // Update DOM
+  const el=document.querySelector(`.db-block[data-bid="${block.id}"]`);
+  if(el){
+    const img=el.querySelector('img');
+    if(img) img.style.transform=`rotate(${block.rotation}deg)`;
+  }
+  const sh=dbGetSheet(dbEditSheetId);
+  dbSave(); if(sh) dbUpdateThumbnail(sh.id);
 });
 document.getElementById('db-img-ctx-download').addEventListener('click',e=>{
   e.stopPropagation();
@@ -7066,8 +7259,8 @@ document.getElementById('db-ctx-edit-sheet').addEventListener('click',e=>{
 document.getElementById('db-dim-cancel').addEventListener('click',()=>{document.getElementById('db-dim-modal').classList.remove('open');dbDimSheetId=null;});
 document.getElementById('db-dim-ok').addEventListener('click',()=>{
   const sh=dbGetSheet(dbDimSheetId); if(sh){
-    sh.wMm=Math.max(50,Math.min(1189,parseFloat(document.getElementById('db-dim-w').value)||297));
-    sh.hMm=Math.max(50,Math.min(1682,parseFloat(document.getElementById('db-dim-h').value)||420));
+    sh.wMm=Math.max(50,Math.min(9999,parseFloat(document.getElementById('db-dim-w').value)||297));
+    sh.hMm=Math.max(50,Math.min(9999,parseFloat(document.getElementById('db-dim-h').value)||420));
     dbSave(); if(dbEditSheetId===sh.id) dbOpenSheet(sh.id);
   }
   document.getElementById('db-dim-modal').classList.remove('open'); dbDimSheetId=null;
@@ -7124,7 +7317,7 @@ document.getElementById('ctx-dashboard').addEventListener('click',()=>{
 });
 
 // Init
-dbLoad();
+dbLoad(); // async — images restore in background, UI is usable immediately
 </script>
 <div id="db-print-container"></div>
 
