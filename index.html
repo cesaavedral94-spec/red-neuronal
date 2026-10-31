@@ -750,11 +750,7 @@
     white-space: nowrap;
     line-height: 1.2;
   }
-  .crb-red {
-    background: #cc0000;
-    height: 3px;
-    opacity: 0.7;
-  }
+  .crb-red { display: none; }
   /* ── Pomodoro time preset buttons ── */
   #crb-pomo-times {
     display: none;
@@ -836,6 +832,17 @@
     line-height: 1;
   }
   .win98-dd-arrow.pressed { opacity: 0.8; }
+  /* Mode stepper: two stacked arrow buttons inside the field */
+  #clock-dd-field { cursor: default; padding-right: 0; }
+  #clock-dd-arrow { display: flex; flex-direction: column; height: 100%; border-left: 1px solid rgba(240,160,48,0.35); }
+  .clk-mode-step {
+    flex: 1; width: 18px; padding: 0; margin: 0; border: none; background: transparent;
+    font-size: 6px; line-height: 1; color: rgba(240,160,48,0.45); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .clk-mode-step + .clk-mode-step { border-top: 1px solid rgba(240,160,48,0.25); }
+  .clk-mode-step:hover { color: #f0a028; background: rgba(240,160,48,0.08); }
+  .clk-mode-step:active { color: #f0a028; background: rgba(240,160,48,0.16); }
   .win98-dd-list {
     display: none;
     position: absolute;
@@ -1824,7 +1831,7 @@
     <div id="clock-mode-dd" class="win98-dd">
       <div class="win98-dd-field" id="clock-dd-field">
         <span class="win98-dd-label" id="clock-dd-label">⏰ Reloj</span>
-        <div class="win98-dd-arrow" id="clock-dd-arrow">▾</div>
+        <div class="win98-dd-arrow" id="clock-dd-arrow"><button class="clk-mode-step" id="clock-mode-up" title="Modo anterior">▲</button><button class="clk-mode-step" id="clock-mode-down" title="Modo siguiente">▼</button></div>
       </div>
       <div class="win98-dd-list" id="clock-dd-list">
         <div class="win98-dd-item win98-selected" data-value="clock">⏰ Reloj</div>
@@ -2424,13 +2431,16 @@ function setAssignedNode(id) {
   tickClock();
 
   // ▼ Win98 dropdown interactions
-  $('clock-dd-field').addEventListener('click', function(e) {
-    const list = $('clock-dd-list');
-    const opening = !list.classList.contains('open');
-    list.classList.toggle('open');
-    $('clock-dd-arrow').classList.toggle('pressed', opening);
-    e.stopPropagation();
-  });
+  // ▲▼ stepper replaces the dropdown: cycle through modes
+  const _modeItems = () => [...document.querySelectorAll('#clock-dd-list .win98-dd-item')];
+  function stepMode(dir) {
+    const items = _modeItems();
+    const i = items.findIndex(el => el.dataset.value === mode);
+    items[(i + dir + items.length) % items.length].click();
+  }
+  $('clock-mode-up').addEventListener('click', e => { e.stopPropagation(); stepMode(-1); });
+  $('clock-mode-down').addEventListener('click', e => { e.stopPropagation(); stepMode(1); });
+  $('clock-dd-field').addEventListener('click', e => e.stopPropagation());
   document.addEventListener('click', closeDropdown);
   $('clock-mode-dd').addEventListener('click', function(e) { e.stopPropagation(); });
 
@@ -6383,6 +6393,20 @@ document.getElementById('ctx-export-web').addEventListener('click', async ()=>{
     btn.classList.toggle('active',on);
     try{ localStorage.setItem('rn-clock-only',on?'1':'0'); }catch(e){}
   };
+  // While minimized, keep the window fitted to the clock when its height changes
+  // (e.g. switching to Pomodoro shows the 15m/25m/50m/90m row).
+  let _fitT=null, _lastH=0;
+  const fitToClock=()=>{
+    if(!document.body.classList.contains('clock-only')) return;
+    const r=document.getElementById('clock-widget').getBoundingClientRect();
+    const w=Math.ceil(r.width), h=Math.ceil(r.height);
+    if(Math.abs(w-innerWidth)<2 && Math.abs(h-innerHeight)<2) return;
+    try{ window.resizeTo(w+(outerWidth-innerWidth), h+(outerHeight-innerHeight)); }catch(e){}
+  };
+  if(window.ResizeObserver){
+    new ResizeObserver(()=>{ clearTimeout(_fitT); _fitT=setTimeout(fitToClock,30); })
+      .observe(document.getElementById('clock-widget'));
+  }
   let on=false; try{ on=localStorage.getItem('rn-clock-only')==='1'; }catch(e){}
   apply(on,true);
   btn.addEventListener('click',e=>{ e.stopPropagation(); on=!on; apply(on); });
