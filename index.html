@@ -904,6 +904,12 @@
     text-shadow: 0 0 6px rgba(240,160,48,0.4);
   }
 
+  /* ── Clock-only mode (minimize everything except the clock) ── */
+  .clock-btn svg { width: 10px; height: 10px; display: block; }
+  body.clock-only > *:not(#clock-widget) { display: none !important; }
+  body.clock-only { background: #060500 !important; overflow: hidden !important; }
+  body.clock-only #clock-widget { top: 0 !important; left: 0 !important; border: none; border-radius: 0; box-shadow: none; }
+
   /* ── Win98 Canvas Context Menu ── */
   #canvas-ctx-menu {
     position: fixed;
@@ -1671,8 +1677,8 @@
   }
 
   /* WEB BUILD — ocultar apartado ESPOL */
-  #ws-espol-btn, #ws-espol-file, #canvas-sync-wrap, #canvas-sync-ov, #espol-registry,
-  #ctx-registry, #cctx-registry, [for="ws-espol-file"] { display:none !important; }
+  #ws-espol-btn, #ws-espol-import-lbl, #canvas-sync-wrap, #canvas-sync-ov, #espol-registry,
+  #ctx-registry, #cctx-registry { display:none !important; }
 </style>
 </head>
 <body>
@@ -1829,6 +1835,7 @@
     <div id="clock-controls">
       <button class="clock-btn" id="clock-play-btn" title="Iniciar / Reanudar">▶</button>
       <button class="clock-btn" id="clock-pause-btn" title="Pausar / Reset">⏸</button>
+      <button class="clock-btn" id="clock-min-btn" title="Minimizar todo (solo reloj)"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="square"><path d="M1 1L4 4M4 1.6V4H1.6M9 1L6 4M6 1.6V4H8.4M1 9L4 6M4 8.4V6H1.6M9 9L6 6M6 8.4V6H8.4"/></svg></button>
     </div>
   </div>
 </div>
@@ -1898,6 +1905,7 @@
   <div class="ctx-item" id="ctx-add-time"><span class="ico">＋</span> Agregar tiempo</div>
   <div class="ctx-sep"></div>
   <div class="ctx-item" id="ctx-dashboard"><span class="ico">⬛</span> Dashboard</div>
+  <div class="ctx-item" id="ctx-export-web"><span class="ico">⤓</span> Exportar para web</div>
   <div class="ctx-sep" id="ctx-sep-instr" style="display:none"></div>
   <div class="ctx-item" id="ctx-instructions" style="display:none"><span class="ico">📋</span> Instrucciones</div>
   <div class="ctx-sep" id="ctx-sep-registry" style="display:none"></div>
@@ -3578,7 +3586,18 @@ function resetView() {
 // Wheel / trackpad handler (main canvas only)
 // Two-finger scroll → zoom centered on cursor; pinch (ctrlKey) → also zoom
 document.addEventListener('wheel', e => {
-  if (document.getElementById('dashboard-overlay').classList.contains('open')) return;
+  if (document.getElementById('dashboard-overlay').classList.contains('open')) {
+    // Pinch outside the sheet area (toolbar, header, margins) must NOT trigger the
+    // browser's native page zoom — that zoom traps the view and breaks navigation.
+    if (e.ctrlKey) {
+      e.preventDefault();
+      if (typeof dbEditSheetId !== 'undefined' && dbEditSheetId) {
+        const factor = e.deltaY < 0 ? 1.08 : 1 / 1.08;
+        dbApplyZoom(dbZoom * factor, e.clientX, e.clientY);
+      }
+    }
+    return;
+  }
   e.preventDefault();
   // Use deltaY for zoom; ignore pure horizontal scroll (deltaX only, no deltaY)
   if (Math.abs(e.deltaY) > 0) {
@@ -3586,6 +3605,28 @@ document.addEventListener('wheel', e => {
     zoomAt(e.clientX, e.clientY, factor);
   }
 }, { passive: false });
+
+// Safari / Dock web app: trackpad pinch fires gesture* events (not ctrl+wheel).
+// Without this, Safari zooms the whole page natively and you can no longer pan.
+(function(){
+  let lastScale = 1, startDbZoom = 1;
+  const dashOpen = () => document.getElementById('dashboard-overlay').classList.contains('open');
+  document.addEventListener('gesturestart', e => {
+    e.preventDefault();
+    lastScale = 1; startDbZoom = (typeof dbZoom !== 'undefined') ? dbZoom : 1;
+  }, { passive: false });
+  document.addEventListener('gesturechange', e => {
+    e.preventDefault();
+    if (dashOpen()) {
+      if (typeof dbEditSheetId !== 'undefined' && dbEditSheetId) dbApplyZoom(startDbZoom * e.scale, e.clientX, e.clientY);
+    } else {
+      const f = e.scale / lastScale;
+      if (isFinite(f) && f > 0) zoomAt(e.clientX, e.clientY, f);
+    }
+    lastScale = e.scale;
+  }, { passive: false });
+  document.addEventListener('gestureend', e => e.preventDefault(), { passive: false });
+})();
 
 // Clear stuck drag/pan state when mouse leaves the browser window
 document.addEventListener('mouseleave', () => {
@@ -3994,7 +4035,7 @@ function clearAll() {
   }
 
   function buildGrid(cssW, cssH) {
-    _dpr = window.devicePixelRatio || 1;
+    _dpr = Math.min(2, window.devicePixelRatio || 1);
     const W = Math.round(cssW * _dpr);
     const H = Math.round(cssH * _dpr);
 
@@ -4021,8 +4062,7 @@ function clearAll() {
     // Sharp crisp line pass
     octx.strokeStyle = 'rgba(0,255,60,0.12)';
     octx.lineWidth   = 0.5;
-    octx.shadowColor = 'rgba(0,255,80,0.25)';
-    octx.shadowBlur  = 2;
+    octx.shadowBlur  = 0; // shadowBlur on ~10k hexes was the main cost on fullscreen
     for (let c = -1; c < cols; c++) {
       for (let r = -1; r < rows; r++) {
         const cx = c * COL_W;
@@ -4047,45 +4087,66 @@ function clearAll() {
     }
   }
 
-  function draw() {
-    const cssW = canvas.clientWidth, cssH = canvas.clientHeight;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // Blit static grid (physical pixels, no extra scaling needed)
-    ctx.drawImage(off, 0, 0);
-
-    // Animated glow fills — drawn in CSS space then scaled
+  // Only repaint the small rectangles around each pulse (not the whole screen every frame)
+  let _lastFrame = 0, _resizing = false;
+  function draw(now) {
+    requestAnimationFrame(draw);
+    if (_resizing || now - _lastFrame < 33) return; // ~30fps is plenty for a slow glow
+    _lastFrame = now;
+    const t = now * 0.001, pad = R + 2;
     ctx.save();
     ctx.scale(_dpr, _dpr);
-    const t = performance.now() * 0.001;
     pulses.forEach(p => {
-      const alpha = ((Math.sin(t * p.speed + p.phase) + 1) * 0.5) * 0.045;
-      if (alpha < 0.002) return;
       const cx = p.c * COL_W;
       const cy = p.r * ROW_H + (p.c % 2 !== 0 ? ROW_H / 2 : 0);
+      // restore the static grid under this pulse
+      const sx = Math.max(0, Math.floor((cx - pad) * _dpr)), sy = Math.max(0, Math.floor((cy - pad) * _dpr));
+      const sw = Math.ceil(pad * 2 * _dpr), sh = Math.ceil(pad * 2 * _dpr);
+      ctx.save(); ctx.setTransform(1,0,0,1,0,0);
+      ctx.clearRect(sx, sy, sw, sh);
+      ctx.drawImage(off, sx, sy, sw, sh, sx, sy, sw, sh);
+      ctx.restore();
+      const alpha = ((Math.sin(t * p.speed + p.phase) + 1) * 0.5) * 0.045;
+      if (alpha < 0.002) return;
       hexPath(ctx, cx, cy);
       ctx.fillStyle = `rgba(0,255,60,${alpha.toFixed(3)})`;
       ctx.fill();
     });
     ctx.restore();
-
-    requestAnimationFrame(draw);
   }
 
+  // Canvas is sized to the whole SCREEN (not the window) and never CSS-stretched,
+  // so resizing the window just reveals/crops it — no pixelation, no rebuild cost.
+  let _bgW = 0, _bgH = 0;
   function resize() {
-    const cssW = window.innerWidth, cssH = window.innerHeight;
-    const dpr  = window.devicePixelRatio || 1;
+    const cssW = Math.max(window.innerWidth,  screen.width  || 0);
+    const cssH = Math.max(window.innerHeight, screen.height || 0);
+    _bgW = cssW; _bgH = cssH;
+    const dpr  = Math.min(2, window.devicePixelRatio || 1);
     canvas.width  = Math.round(cssW * dpr);
     canvas.height = Math.round(cssH * dpr);
     canvas.style.width  = cssW + 'px';
     canvas.style.height = cssH + 'px';
     buildGrid(cssW, cssH);
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(off, 0, 0);
     drawConnections();
   }
 
-  window.addEventListener('resize', resize);
+  // Debounce: fullscreen fires dozens of resize events during the animation;
+  // rebuild once when it settles (the canvas just stretches in the meantime).
+  let _rzTimer = null;
+  window.addEventListener('resize', () => {
+    drawConnections();
+    // Only rebuild if the window grew beyond the pre-built grid (e.g. moved to a bigger monitor)
+    if (window.innerWidth <= _bgW && window.innerHeight <= _bgH) return;
+    _resizing = true;
+    clearTimeout(_rzTimer);
+    _rzTimer = setTimeout(() => { _resizing = false; resize(); }, 180);
+  });
   resize();
-  draw();
+  requestAnimationFrame(draw);
 })();
 
 // ═══════════════════════════════════════════════════════════════
@@ -5509,18 +5570,19 @@ function dbApplyZoom(newZoom, focalClientX, focalClientY) {
   const scroll=document.getElementById('db-sheet-scroll');
   const canvas=document.getElementById('db-sheet-canvas');
   const rect=scroll.getBoundingClientRect();
+  const PAD=32; // #db-sheet-scroll padding
   const focalX=focalClientX-rect.left;
   const focalY=focalClientY-rect.top;
   // canvas coord of focal point at current zoom
-  const cfx=(scroll.scrollLeft+focalX)/dbZoom;
-  const cfy=(scroll.scrollTop+focalY)/dbZoom;
-  dbZoom=Math.max(0.15,Math.min(4,newZoom));
+  const cfx=(scroll.scrollLeft+focalX-PAD)/dbZoom;
+  const cfy=(scroll.scrollTop+focalY-PAD)/dbZoom;
+  newZoom=Math.max(0.15,Math.min(4,newZoom));
+  if(!isFinite(newZoom)) return;
+  dbZoom=newZoom;
   canvas.style.zoom=dbZoom;
-  // restore focal point
-  requestAnimationFrame(()=>{
-    scroll.scrollLeft=cfx*dbZoom-focalX;
-    scroll.scrollTop=cfy*dbZoom-focalY;
-  });
+  // restore focal point (sync, so rapid pinch events don't fight each other)
+  scroll.scrollLeft=cfx*dbZoom-focalX+PAD;
+  scroll.scrollTop=cfy*dbZoom-focalY+PAD;
   dbUpdateZoomIndicator();
 }
 document.getElementById('dbn-zoom-reset').addEventListener('click',()=>{
@@ -6260,16 +6322,78 @@ document.getElementById('ctx-dashboard').addEventListener('click',()=>{
   const id=ctxTarget; hideCtx(); if(id) openDashboard(id);
 });
 
+// ── Exportar un nodo + todo lo que cuelga de él (nodos, dashboards, imágenes, PDFs) ──
+document.getElementById('ctx-export-web').addEventListener('click', async ()=>{
+  const id=ctxTarget; hideCtx(); if(!id||!nodes[id]) return;
+  const ids=[id, ...getDescendants(id)];
+  const outNodes={};
+  ids.forEach(nid=>{ if(nodes[nid]) outNodes[nid]=JSON.parse(JSON.stringify(nodes[nid])); });
+  outNodes[id].parentId=null; // becomes the root of the exported copy
+  const imgMap=await _imgIdbLoadAll();
+  const dash={}, pdfs={};
+  for(const nid of ids){
+    const d=dashboardData[nid]; if(!d) continue;
+    const copy=JSON.parse(JSON.stringify(d));
+    for(const sh of (copy.sheets||[])) for(const b of (sh.blocks||[])){
+      if(b.type==='image'&&!b.content&&imgMap[b.id]) b.content=imgMap[b.id];
+      if(b.type==='pdf'&&b.pdfId&&!pdfs[b.pdfId]){
+        const buf=await dbGetPdfData(b.pdfId);
+        if(buf){ let bin=''; const u=new Uint8Array(buf); for(let i=0;i<u.length;i+=0x8000) bin+=String.fromCharCode.apply(null,u.subarray(i,i+0x8000)); pdfs[b.pdfId]=btoa(bin); }
+      }
+    }
+    dash[nid]=copy;
+  }
+  const payload={ format:'red-neuronal-export-v1', exportedAt:new Date().toISOString(),
+    rootId:id, name:nodes[id].label||'Exportado', nodes:outNodes, depthColorMap:JSON.parse(JSON.stringify(depthColorMap||{})),
+    dashboards:dash, pdfs };
+  const blob=new Blob([JSON.stringify(payload)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download=(nodes[id].label||'export').replace(/[^\w\-áéíóúñÁÉÍÓÚÑ ]+/g,'').trim().replace(/\s+/g,'_')+'_export.json';
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+});
+
+// ── Minimizar todo: deja solo el reloj ──
+(function(){
+  const btn=document.getElementById('clock-min-btn'); if(!btn) return;
+  const IN='<svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="square"><path d="M1 1L4 4M4 1.6V4H1.6M9 1L6 4M6 1.6V4H8.4M1 9L4 6M4 8.4V6H1.6M9 9L6 6M6 8.4V6H8.4"/></svg>', OUT='<svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="square"><path d="M4 4L1 1M1 3.4V1H3.4M6 4L9 1M9 3.4V1H6.6M4 6L1 9M1 6.6V9H3.4M6 6L9 9M9 6.6V9H6.6"/></svg>';
+  // Resize the actual app window to fit the clock (works in the installed Dock app / popup windows)
+  const shrinkWindow=()=>{
+    try{
+      if(!localStorage.getItem('rn-clock-prev')) localStorage.setItem('rn-clock-prev',JSON.stringify({w:outerWidth,h:outerHeight,x:screenX,y:screenY}));
+      requestAnimationFrame(()=>{
+        const r=document.getElementById('clock-widget').getBoundingClientRect();
+        const dw=outerWidth-innerWidth, dh=outerHeight-innerHeight;
+        window.resizeTo(Math.ceil(r.width)+dw, Math.ceil(r.height)+dh);
+      });
+    }catch(e){}
+  };
+  const restoreWindow=()=>{
+    try{
+      const p=JSON.parse(localStorage.getItem('rn-clock-prev')||'null');
+      if(p){ window.resizeTo(p.w,p.h); window.moveTo(p.x,p.y); }
+      localStorage.removeItem('rn-clock-prev');
+    }catch(e){}
+  };
+  const apply=(on,init)=>{
+    if(on){ document.body.classList.add('clock-only'); shrinkWindow(); }
+    else if(init){ document.body.classList.remove('clock-only'); }
+    else { document.body.classList.remove('clock-only'); restoreWindow(); if(typeof drawConnections==='function') drawConnections(); }
+    btn.innerHTML=on?OUT:IN;
+    btn.title=on?'Restaurar todo':'Minimizar todo (solo reloj)';
+    btn.classList.toggle('active',on);
+    try{ localStorage.setItem('rn-clock-only',on?'1':'0'); }catch(e){}
+  };
+  let on=false; try{ on=localStorage.getItem('rn-clock-only')==='1'; }catch(e){}
+  apply(on,true);
+  btn.addEventListener('click',e=>{ e.stopPropagation(); on=!on; apply(on); });
+})();
+
 // Init
 dbLoad(); // async — images restore in background, UI is usable immediately
 
 // ── WEB BUILD: sin apartado ESPOL ──
-(function(){
-  try{
-    const cur=workspaces.find(w=>w.id===activeWsId);
-    if(cur&&cur.type==='canvas'){ const o=workspaces.find(w=>w.type!=='canvas'); if(o) wsSwitch(o.id); }
-  }catch(e){ console.warn('web build ws switch:',e); }
-})();
+(function(){ try{ const cur=workspaces.find(w=>w.id===activeWsId);
+  if(cur&&cur.type==='canvas'){ const o=workspaces.find(w=>w.type!=='canvas'); if(o) wsSwitch(o.id); } }catch(e){} })();
 </script>
 <div id="db-print-container"></div>
 
